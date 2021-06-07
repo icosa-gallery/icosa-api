@@ -2,7 +2,7 @@ from typing import List
 import json
 from datetime import datetime, timedelta
 from fastapi import Depends, HTTPException
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import OAuth2AuthorizationCodeBearer
 from fastapi.encoders import jsonable_encoder
 import jwt
 from passlib.context import CryptContext
@@ -31,8 +31,7 @@ SENDGRID_RESET_TEMPLATE = SENDGRID["reset_password_template"]
 
 sendgrid = SendGridAPIClient(SENDGRID_API_KEY)
 
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login", auto_error=False)
+oauth2_scheme = OAuth2AuthorizationCodeBearer(authorizationUrl="/authorization/login.html", tokenUrl="/oauth/token", auto_error=False)
 
 async def authenticate_user(username: str, password: str):
     query = users.select()

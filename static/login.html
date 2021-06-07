@@ -2,8 +2,9 @@
     label, label > span { display: block; }
     label { margin: 15px 0; }
   </style>
+
   
-  <form action="/login" method="post">
+  <form action="/oauth/authorize" method="post">
     <label>
       <span>username/email</span>
       <input type="text" name="username">
@@ -12,5 +13,19 @@
       <span>Password</span>
       <input type="password" name="password">
     </label>
-    <button>Submit</button>
+    <button id="submitbutton">Submit</button>
   </form>
+
+  <script>
+    const queryString = window.location.search;
+    const urlParams = new URLSearchParams(queryString);
+
+    const response_type = urlParams.get('response_type');
+    const client_id = urlParams.get('client_id');
+    const redirect_uri = urlParams.get('redirect_uri');
+    const scope = urlParams.get('scope');
+    var nonce = urlParams.get('nonce');
+    if (!nonce) nonce = urlParams.get('state');
+    button = document.getElementById('submitbutton');
+    button.formAction=`/oauth/authorize?response_type=${response_type}&client_id=${client_id}&redirect_uri=${redirect_uri}&scope=${scope}&nonce=${nonce}`
+  </script>

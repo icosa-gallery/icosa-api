@@ -43,11 +43,10 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 43800
 @router.post('/authorize')
 async def authorize(
         request: Request,
-        id: str = Form(...)):
+        username: str = Form(...),
+        password: str = Form(...)):
     '''Provide authorization code response'''
-    query = users.select()
-    query = query.where(users.c.id == int(id))
-    user = await database.fetch_one(query);
+    user = await authentication.authenticate_user(username, password)
 
     # user = db.query(User).filter(User.uuid == uuid).first()  # pylint: disable=E1101
     
