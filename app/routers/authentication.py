@@ -1,13 +1,28 @@
 
 from authlib.oauth2 import OAuth2Error
 from datetime import timedelta
-from fastapi import APIRouter, Request, Form, status, Depends, HTTPException
+from fastapi import APIRouter, Request, Form, requests, status, Depends, HTTPException
 from fastapi.responses import RedirectResponse
 from fastapi.encoders import jsonable_encoder
 from fastapi.security import OAuth2PasswordRequestForm
 
 from app.utilities.schema_models import LoginToken
 import app.utilities.authentication as authentication
+
+import time
+from authlib.oauth2 import OAuth2Error
+from fastapi import APIRouter, Request, Form, status
+from fastapi.responses import RedirectResponse
+from fastapi.templating import Jinja2Templates
+from werkzeug.security import gen_salt
+from app.utilities.oauth2 import authorization, require_oauth, generate_user_info
+from app.database.database_connector import db
+from app.utilities.schema_models import FullUser
+
+from app.database.database_schema import users, OAuth2Client
+from app.database.database_connector import database
+from app.utilities.snowflake import generate_snowflake
+
 
 router = APIRouter(
     prefix="/oauth",
@@ -25,31 +40,34 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 43800
 #     access_token = authentication.create_access_token(data={"sub": user["email"]}, expires_delta=access_token_expires)
 #     return {"access_token": access_token, "token_type": "bearer"}
 
-@router.post('/oauth/authorize')
-def authorize(
+@router.post('/authorize')
+async def authorize(
         request: Request,
-        uuid: str = Form(...)):
+        id: str = Form(...)):
     '''Provide authorization code response'''
-    user = db.query(User).filter(User.uuid == uuid).first()  # pylint: disable=E1101
+    query = users.select()
+    query = query.where(users.c.id == int(id))
+    user = await database.fetch_one(query);
 
+    # user = db.query(User).filter(User.uuid == uuid).first()  # pylint: disable=E1101
+    
     if not user:
-        user = User(uuid=uuid)
+        raise HTTPException(404, "User not found.")
+        user = FullUser(id=id)
         db.add(user)  # pylint: disable=E1101
         db.commit()  # pylint: disable=E1101
 
     request.body = {
-        'uuid': uuid
+        'id': id
     }
-
     try:
         authorization.validate_consent_request(request=request, end_user=user)
     except OAuth2Error as error:
         return dict(error.get_body())
-
     return authorization.create_authorization_response(request=request, grant_user=user)
 
 
-@router.post('/oauth/token')
+@router.post('/token')
 def token(
         request: Request,
         grant_type: str = Form(...),
@@ -77,11 +95,10 @@ def token(
 
     if client_secret:
         request.body['client_secret'] = client_secret
-
     return authorization.create_token_response(request=request)
 
 
-@router.post('/oauth/introspect')
+@router.post('/introspect')
 def introspect_token(
         request: Request,
         token: str = Form(...),  # pylint: disable=W0621
@@ -98,7 +115,7 @@ def introspect_token(
     return authorization.create_endpoint_response('introspection', request=request)
 
 
-@router.post('/oauth/revoke')
+@router.post('/revoke')
 def revoke_token(
         request: Request,
         token: str = Form(...),  # pylint: disable=W0621
@@ -115,8 +132,47 @@ def revoke_token(
     return authorization.create_endpoint_response('revocation', request=request)
 
 
-@router.get('/oauth/userinfo')
+@router.get('/userinfo')
 def userinfo(request: Request):
     '''Request user profile information'''
     with require_oauth.acquire(request, 'profile') as token:  # pylint: disable=W0621
         return generate_user_info(token.user, token.scope)
+
+@router.post('/create_client')
+def post_create_client(  # pylint: disable=R0913
+        client_name: str = Form(...),
+        client_uri: str = Form(...),
+        grant_type: str = Form(...),
+        redirect_uri: str = Form(...),
+        response_type: str = Form(...),
+        scope: str = Form(...),
+        token_endpoint_auth_method: str = Form(...)):
+    '''Create the client information'''
+    client_id = gen_salt(24)
+    client_id_issued_at = int(time.time())
+    client = OAuth2Client(
+        id=generate_snowflake(),
+        client_id=client_id,
+        client_id_issued_at=client_id_issued_at
+    )
+
+    client_metadata = {
+        'client_name': client_name,
+        'client_uri': client_uri,
+        'grant_types': grant_type.splitlines(),
+        'redirect_uris': redirect_uri.splitlines(),
+        'response_types': response_type.splitlines(),
+        'scope': scope,
+        'token_endpoint_auth_method': token_endpoint_auth_method
+    }
+    client.set_client_metadata(client_metadata)
+
+    if token_endpoint_auth_method == 'none':
+        client.client_secret = ''
+    else:
+        client.client_secret = gen_salt(48)
+
+    db.add(client)  # pylint: disable=E1101
+    db.commit()  # pylint: disable=E1101
+
+    return RedirectResponse(url='/', status_code=status.HTTP_303_SEE_OTHER)
